@@ -28,7 +28,7 @@ def sigmoid(z):
 
 def generate_data(
     random_seed=0, num_subjects=NUM_SUBJECTS, num_obs_range=[50, 100],
-    beta=[-2., 2.], sigma=[1., 1.]):
+    beta=[-.1, .3], sigma=[1., 1.]):
 
     rng = np.random.RandomState(random_seed)
 
@@ -60,6 +60,20 @@ def generate_data(
     y = (rng.rand(len(y_probs)) < y_probs).astype(np.float32)
 
     # summary of outcomes
+
+    return X, sid, sid_nobs, y
+
+
+def load_sam_data(dataset_idx):
+
+    df = pd.read_csv('../data/sam_data.csv')
+
+    sid = df['id'].values.astype(np.int32)
+    sid_nobs = (np.ones_like(sid) * 50).astype(np.int32)
+
+    y = df['y.%i' % (dataset_idx + 1)].values.astype(np.float32)
+
+    X = np.stack([np.ones_like(sid), df['x'].values]).T.astype(np.float32)
 
     return X, sid, sid_nobs, y
 
@@ -201,6 +215,7 @@ def main():
     for i in range(NUM_RUNS):
 
         X, sid, sid_nobs, y = generate_data(num_subjects=NUM_SUBJECTS, random_seed=i)
+        #X, sid, sid_nobs, y = load_sam_data(dataset_idx=i)
 
         loader = BatchLoader(sid, sid_nobs, X, X, y)
 
