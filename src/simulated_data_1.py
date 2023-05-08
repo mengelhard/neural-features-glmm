@@ -116,7 +116,10 @@ class BatchLoader:
             yield (torch.from_numpy(arr[idx]) for arr in (self.idx_arr, *self.arrs))
 
     
-def train(model, batchloader, max_epochs, ss_steps=1, pop_steps=1, eps=1e-4):
+def train(
+    model, batchloader, max_epochs,
+    ss_steps=1, pop_steps=1, eps=1e-4,
+    ss_converge=False, max_ss_steps=1000, ss_eps=1e-3):
     
     ss_opt = optim.Adam(model.ss_params)
     pop_opt = optim.Adam(model.pop_params)
@@ -127,19 +130,45 @@ def train(model, batchloader, max_epochs, ss_steps=1, pop_steps=1, eps=1e-4):
     for epoch in range(max_epochs):
         
         epoch_loss = []
+        total_ss_steps = []
         
         for batch_idx, (sid_batch, sid_nobs_batch, x_batch, z_batch, y_batch) in enumerate(
             batchloader.get_batches(batch_size=50)):
             
             #print(x_batch.dtype, sid_batch.dtype, sid_nobs_batch.dtype, y_batch.dtype)
+
+            if ss_converge:
+
+                ss_best_loss = np.inf
+
+                for step in range(max_ss_steps):
+
+                    ss_opt.zero_grad()
+
+                    loss = model.nll(x_batch, z_batch, sid_batch, sid_nobs_batch, y_batch)
+                    loss.backward()
+                    ss_opt.step()
+
+                    ss_step_loss = loss.detach().numpy()
+
+                    if (ss_step_loss / ss_best_loss) > (1. - ss_eps):
+                        break
+
+                    ss_best_loss = min(ss_best_loss, ss_step_loss)
+
+                total_ss_steps.append(step + 1)
+
+            else:
             
-            for step in range(ss_steps):
-            
-                ss_opt.zero_grad()              
+                for step in range(ss_steps):
                 
-                loss = model.nll(x_batch, z_batch, sid_batch, sid_nobs_batch, y_batch)
-                loss.backward()
-                ss_opt.step()
+                    ss_opt.zero_grad()
+                    
+                    loss = model.nll(x_batch, z_batch, sid_batch, sid_nobs_batch, y_batch)
+                    loss.backward()
+                    ss_opt.step()
+
+                total_ss_steps.append(step + 1)
                 
             for step in range(pop_steps):
                 
@@ -154,7 +183,7 @@ def train(model, batchloader, max_epochs, ss_steps=1, pop_steps=1, eps=1e-4):
             
         epoch_loss = np.mean(epoch_loss)
         all_loss.append(epoch_loss)
-        print('Epoch %i; Loss = %.3f' % (epoch, epoch_loss))
+        print('Epoch %i; Loss = %.3f; Avg # SS Steps = %.2f' % (epoch, epoch_loss, np.mean(total_ss_steps)))
 
         if (epoch_loss / best_loss) > (1. - eps):
             break
@@ -177,23 +206,29 @@ def main():
 
         mdl = NeuralFeaturesGLMM(2, NUM_SUBJECTS, 2)
 
-        all_loss = train(mdl, loader, MAX_EPOCHS, ss_steps=1)
+        all_loss = train(mdl, loader, MAX_EPOCHS, ss_converge=True, ss_steps=1)
 
         beta1, beta2 = mdl.pop_params_layer.weight.detach().numpy()[0]
         logsigma1, logsigma2 = mdl.ss_params_logsigma.detach().numpy()
 
-        results.append({
+        current_results = {
             'beta1': beta1,
             'beta2': beta2,
             'logsigma1': logsigma1[0],
             'logsigma2': logsigma2[0]
-            })
+            }
+
+        print('Training run results:')
+        print(current_results)
+        print()
+
+        results.append(current_results)
 
         loss_plots.append(all_loss)
 
-    pd.DataFrame(results).to_csv('sim_1_results.csv')
+    pd.DataFrame(results).to_csv('sim_1_ss_converge_results.csv')
 
-    with open('sim_1_loss_plots.pickle', 'wb') as f:
+    with open('sim_1_ss_converge_loss_plots.pickle', 'wb') as f:
         pickle.dump(all_loss, f)
 
 
